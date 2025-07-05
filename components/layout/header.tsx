@@ -55,7 +55,7 @@ export function Header() {
         </div>
         
         <div className="hidden md:flex items-center space-x-4">
-          <span className="text-sm font-medium">Pick #{currentPick}</span>
+            <span className="text-sm font-medium">Pick #{currentPick}</span>
         </div>
         
         <div className="flex items-center gap-2">

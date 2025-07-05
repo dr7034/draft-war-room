@@ -33,6 +33,7 @@ import { Player } from '@/types/player';
 import { League } from '@/types/league';
 import { generateDraftStrategy } from '@/lib/analysis-utils';
 import { PickAttributionService } from '@/lib/pick-attribution-service';
+import MyTeamPreDraft from './MyTeamPreDraft';
 
 // Helper: get team logo URL (use static or fallback)
 const getTeamLogo = (team: string) => {
@@ -979,7 +980,29 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("cheatsheet");
   const [preDraftMessageDismissed, setPreDraftMessageDismissed] = useState(false);
   const { league, draftStarted, isLoading } = useDraftContext();
-  
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftStart, setDraftStart] = useState<Date | null>(null);
+
+  useEffect(() => {
+    const fetchDraft = async () => {
+      if (!league?.id) return;
+      try {
+        const draftsRes = await fetch(`https://api.sleeper.app/v1/league/${league.id}/drafts`);
+        if (!draftsRes.ok) throw new Error('Failed to fetch drafts');
+        const drafts = await draftsRes.json();
+        if (!drafts.length) throw new Error('No drafts found');
+        setDraftId(drafts[0].draft_id);
+        if (drafts[0].start_time) {
+          setDraftStart(new Date(Number(drafts[0].start_time)));
+        }
+      } catch (err) {
+        setDraftId(null);
+        setDraftStart(null);
+      }
+    };
+    fetchDraft();
+  }, [league?.id]);
+
   return (
     <div className="flex flex-col min-h-screen bg-background relative overflow-hidden">
       {/* Animated background gradient */}
@@ -999,58 +1022,39 @@ export default function Dashboard() {
         )}
         
         <Tabs 
-          defaultValue="cheatsheet" 
+          defaultValue="myteam" 
           className="w-full"
           onValueChange={setActiveTab}
         >
-          <TabsList className="flex justify-center gap-3 mb-10 rounded-3xl bg-white/30 dark:bg-slate-900/40 shadow-2xl backdrop-blur-lg border border-blue-300 dark:border-blue-800 p-2">
-            <TabsTrigger value="cheatsheet" className="group flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-base transition-all
-              data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500
-              data-[state=active]:text-white data-[state=active]:shadow-2xl data-[state=active]:scale-110
-              hover:scale-105 hover:shadow-lg">
-              <ClipboardList className="w-5 h-5 group-data-[state=active]:text-white text-blue-700 dark:text-blue-300 transition-colors" />
-              Cheat Sheet
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="myteam" className="flex items-center gap-2">
+              🏈 My Team
             </TabsTrigger>
-            <TabsTrigger value="draft" className="group flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-base transition-all
-              data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500
-              data-[state=active]:text-white data-[state=active]:shadow-2xl data-[state=active]:scale-110
-              hover:scale-105 hover:shadow-lg">
-              <LayoutDashboard className="w-5 h-5 group-data-[state=active]:text-white text-blue-700 dark:text-blue-300 transition-colors" />
-              Draft Board
+            <TabsTrigger value="cheatsheet" className="flex items-center gap-2">
+              📋 Cheat Sheet
             </TabsTrigger>
-            <TabsTrigger value="rosters" className="group flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-base transition-all
-              data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500
-              data-[state=active]:text-white data-[state=active]:shadow-2xl data-[state=active]:scale-110
-              hover:scale-105 hover:shadow-lg">
-              <Users className="w-5 h-5 group-data-[state=active]:text-white text-blue-700 dark:text-blue-300 transition-colors" />
-              League Rosters
+            <TabsTrigger value="draftboard" className="flex items-center gap-2">
+              🗂️ Draft Board
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="group flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-base transition-all
-              data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500
-              data-[state=active]:text-white data-[state=active]:shadow-2xl data-[state=active]:scale-110
-              hover:scale-105 hover:shadow-lg">
-              <BarChart2 className="w-5 h-5 group-data-[state=active]:text-white text-blue-700 dark:text-blue-300 transition-colors" />
-              Analytics
-            </TabsTrigger>
-            <TabsTrigger value="transactions" className="group flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-base transition-all
-              data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500
-              data-[state=active]:text-white data-[state=active]:shadow-2xl data-[state=active]:scale-110
-              hover:scale-105 hover:shadow-lg">
-              <ListChecks className="w-5 h-5 group-data-[state=active]:text-white text-blue-700 dark:text-blue-300 transition-colors" />
-              Transactions
+            <TabsTrigger value="league" className="flex items-center gap-2">
+              🏆 League
             </TabsTrigger>
           </TabsList>
+          
+          <TabsContent value="myteam">
+            <MyTeamPreDraft draftStart={draftStart} draftId={draftId} />
+          </TabsContent>
           
           <TabsContent value="cheatsheet" className="space-y-4">
             <CheatSheet />
           </TabsContent>
           
-          <TabsContent value="draft" className="space-y-4">
+          <TabsContent value="draftboard" className="space-y-4">
             <PlayerList />
             <DraftBoard />
           </TabsContent>
           
-          <TabsContent value="rosters" className="space-y-4">
+          <TabsContent value="league" className="space-y-4">
             {league?.id && league?.userId ? (
               <LeagueRosters leagueId={league.id} userId={league.userId} />
             ) : (
@@ -1059,14 +1063,6 @@ export default function Dashboard() {
                 <div className="text-lg font-semibold text-muted-foreground">{!league?.id ? 'Select a league to view rosters.' : 'Loading league rosters...'}</div>
               </div>
             )}
-          </TabsContent>
-          
-          <TabsContent value="analytics" className="space-y-4">
-            <AnalyticsPanel />
-          </TabsContent>
-          
-          <TabsContent value="transactions" className="space-y-4">
-            <Transactions />
           </TabsContent>
         </Tabs>
       </main>

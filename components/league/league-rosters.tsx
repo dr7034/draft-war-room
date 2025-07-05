@@ -415,6 +415,55 @@ export default function LeagueRosters({ leagueId, userId }: LeagueRostersProps) 
               </DialogTitle>
             </DialogHeader>
 
+            {/* --- MY TEAM SECTION --- */}
+            {selectedTeam.ownerId === userId && (
+              <div className="space-y-8 my-8">
+                <h2 className="text-2xl font-bold mb-4">My Team: Pre-Draft Overview</h2>
+
+                {/* 1. Draft Capital Overview */}
+                <section>
+                  <h3 className="text-xl font-semibold mb-2">Draft Capital Overview</h3>
+                  <div className="text-muted-foreground">[Grid/Table of all rounds and slots, highlight your picks, show extras/missing]</div>
+                </section>
+
+                {/* 2. Draft Order Context */}
+                <section>
+                  <h3 className="text-xl font-semibold mb-2">Draft Order Context</h3>
+                  <div className="text-muted-foreground">[Show your draft slot, pick numbers for each round, and full draft order for Round 1]</div>
+                </section>
+
+                {/* 3. Roster Needs/Strengths */}
+                <section>
+                  <h3 className="text-xl font-semibold mb-2">Roster Needs & Strengths</h3>
+                  <div className="text-muted-foreground">[Summary of roster by position, highlight weak spots, show average age]</div>
+                </section>
+
+                {/* 4. Trade Suggestions */}
+                <section>
+                  <h3 className="text-xl font-semibold mb-2">Trade Suggestions</h3>
+                  <div className="text-muted-foreground">[Suggest trading for more picks if missing, or packaging extras]</div>
+                </section>
+
+                {/* 5. Draft Strategy Tips */}
+                <section>
+                  <h3 className="text-xl font-semibold mb-2">Draft Strategy Tips</h3>
+                  <div className="text-muted-foreground">[Blurb or link to draft strategy guide, best available by position]</div>
+                </section>
+
+                {/* 6. League Settings Recap */}
+                <section>
+                  <h3 className="text-xl font-semibold mb-2">League Settings Recap</h3>
+                  <div className="text-muted-foreground">[Scoring format, roster size, draft type, special rules]</div>
+                </section>
+
+                {/* 7. Countdown/Timer */}
+                <section>
+                  <h3 className="text-xl font-semibold mb-2">Draft Countdown</h3>
+                  <div className="text-muted-foreground">[Countdown to draft start, show local start time]</div>
+                </section>
+              </div>
+            )}
+
             <div className="space-y-6">
               {/* Team Stats */}
               <Card>

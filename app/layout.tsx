@@ -27,8 +27,8 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <LeagueContextProvider>
-            {children}
-            <Toaster />
+          {children}
+          <Toaster />
           </LeagueContextProvider>
         </ThemeProvider>
       </body>

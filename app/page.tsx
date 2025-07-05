@@ -107,12 +107,12 @@ export default function OnboardingPage() {
 
   // If league is selected, show dashboard
   if (selectedLeague) {
-    return (
-      <main className="min-h-screen">
-        <DraftContextProvider league={selectedLeague}>
-          <Dashboard />
-        </DraftContextProvider>
-      </main>
+  return (
+    <main className="min-h-screen">
+      <DraftContextProvider league={selectedLeague}>
+        <Dashboard />
+      </DraftContextProvider>
+    </main>
     );
   }
 

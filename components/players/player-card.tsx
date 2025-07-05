@@ -9,7 +9,7 @@ import {
   Star, 
   AlertCircle,
   Zap,
-  Shield
+  Shield 
 } from 'lucide-react';
 import {
   Tooltip,
@@ -111,7 +111,7 @@ export default function PlayerCard({ player, showDetails = false, onClick }: Pla
             <div className="rounded-full bg-white/70 dark:bg-slate-900/70 shadow-md flex items-center justify-center" style={{ width: 48, height: 48 }}>
               {TeamLogo ? <TeamLogo size={40} /> : <Zap className="h-8 w-8 text-muted-foreground" />}
             </div>
-            <div>
+          <div>
               <h3 className="font-semibold text-lg leading-tight">{player.name}</h3>
               <div className="flex items-center gap-2 mt-1">
                 <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${getPositionColor()}`}>{player.position}</span>
