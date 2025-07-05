@@ -185,57 +185,7 @@ export default function LeagueRosters({ leagueId, userId }: LeagueRostersProps) 
     fetchTeamData(roster);
   };
 
-  // Build userIdToRosterId from rosters
-  const userIdToRosterId: Record<string, number> = {};
-  rosters.forEach(r => {
-    userIdToRosterId[r.ownerId] = r.id;
-  });
 
-  // Build slotToUserId from draft.draft_order
-  const slotToUserId: Record<number, string> = {};
-  if (teamDraftData?.draft?.draft_order) {
-    Object.entries(teamDraftData.draft.draft_order).forEach(([userId, slot]) => {
-      slotToUserId[parseInt(slot as string)] = userId;
-    });
-  }
-
-  // Build slotToRosterId using slotToUserId and userIdToRosterId
-  const slotToRosterId: Record<number, number> = {};
-  Object.entries(slotToUserId).forEach(([slot, userId]) => {
-    slotToRosterId[parseInt(slot)] = userIdToRosterId[userId];
-  });
-
-  // Robust pick trade chain function
-  function getPickTradeChain(round: number, slot: number, tradedPicks: any[], slotToRosterId: Record<number, number>) {
-    const originalOwner = slotToRosterId[slot];
-    let currentOwner = originalOwner;
-    const chain: { from: number, to: number, trade: any }[] = [];
-    const trades = tradedPicks
-      .filter(tp => tp.round === round && tp.pick === slot)
-      .sort((a, b) => (a.created && b.created ? a.created - b.created : 0));
-    for (const trade of trades) {
-      chain.push({ from: currentOwner, to: trade.owner_id, trade });
-      currentOwner = trade.owner_id;
-    }
-    return { chain, finalOwner: currentOwner, originalOwner };
-  }
-
-  // For draft board: get all picks and their final owners
-  const picks: { round: number, slot: number, finalOwner: number, originalOwner: number, chain: any[] }[] = [];
-  if (teamDraftData?.draft) {
-    const rounds = teamDraftData.draft.settings.rounds;
-    const teams = teamDraftData.draft.settings.teams;
-    for (let round = 1; round <= rounds; round++) {
-      for (let slot = 1; slot <= teams; slot++) {
-        const { chain, finalOwner, originalOwner } = getPickTradeChain(round, slot, teamDraftData.tradedPicks, slotToRosterId);
-        picks.push({ round, slot, finalOwner, originalOwner, chain });
-      }
-    }
-  }
-
-  // For the selected team, show only picks where they are the final owner
-  const owned = picks.filter(p => p.finalOwner === selectedTeam?.id);
-  const sent = picks.filter(p => p.originalOwner === selectedTeam?.id && p.finalOwner !== selectedTeam?.id);
 
   function getTeamNameByRosterId(rosterId: number) {
     const userId = rosterIdToUserId[rosterId];
@@ -497,155 +447,235 @@ export default function LeagueRosters({ leagueId, userId }: LeagueRostersProps) 
               </Card>
 
               {/* Draft Information */}
-              {teamDraftData && (() => {                
-                // Get status badge color
-                const getStatusBadge = (status: string) => {
-                  switch (status) {
-                    case 'pre_draft':
-                      return <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 text-xs font-medium rounded-full">Pre-Draft</span>;
-                    case 'in_progress':
-                      return <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">In Progress</span>;
-                    case 'complete':
-                      return <span className="px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full">Complete</span>;
-                    default:
-                      return <span className="px-2 py-1 bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full">{status}</span>;
-                  }
-                };
-
-                // Get actual pick numbers for this team
-                const getTeamPickNumbers = () => {
-                  const pickNumbers: string[] = [];
-                  const rounds = teamDraftData.draft.settings.rounds;
-                  const teams = teamDraftData.draft.settings.teams;
-                  
-                  // Build slot-to-userId map
-                  const slotToUserId: Record<number, string> = {};
-                  if (teamDraftData.draft.draft_order) {
-                    Object.entries(teamDraftData.draft.draft_order).forEach(([userId, slot]) => {
-                      slotToUserId[slot as number] = userId;
-                    });
-                  }
-
-                  // Build slot-to-roster_id map
-                  const slotToRosterId: Record<number, number> = {};
-                  if (teamDraftData.draft.slot_to_roster_id) {
-                    Object.entries(teamDraftData.draft.slot_to_roster_id).forEach(([slot, rosterId]) => {
-                      slotToRosterId[parseInt(slot)] = rosterId as number;
-                    });
-                  }
-
-                  // For each round and slot, determine who owns the pick
-                  for (let round = 1; round <= rounds; round++) {
-                    for (let slot = 1; slot <= teams; slot++) {
-                      // Find if this pick was traded
-                      const traded = teamDraftData.tradedPicks.find(
-                        (tp: any) => tp.round === round && tp.pick === slot
-                      );
-                      
-                      // Determine current owner
-                      let currentOwnerRosterId: number;
-                      if (traded) {
-                        // Pick was traded - current owner is the new owner
-                        currentOwnerRosterId = traded.owner_id;
-                      } else {
-                        // Pick wasn't traded - current owner is the original slot owner
-                        currentOwnerRosterId = slotToRosterId[slot];
-                      }
-                      
-                      // If this team owns this pick
-                      if (currentOwnerRosterId === selectedTeam.id) {
-                        pickNumbers.push(`${round}.${slot.toString().padStart(2, '0')}`);
-                      }
-                    }
-                  }
-                  
-                  return pickNumbers;
-                };
-
-                const pickNumbers = getTeamPickNumbers();
-                const tradedAwayRounds = sent.map(pick => pick.round);
-
-                return (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Target className="h-5 w-5" />
-                        Draft Information
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                      {/* Draft Status */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-3">
-                          <h4 className="font-semibold text-lg">Draft Status</h4>
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">Status:</span>
-                              {getStatusBadge(teamDraftData.draft.status)}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              {teamDraftData.draft.type.charAt(0).toUpperCase() + teamDraftData.draft.type.slice(1)} • {teamDraftData.draft.settings.rounds} Rounds • {teamDraftData.draft.settings.teams} Teams
-                            </div>
+              {teamDraftData && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Target className="h-5 w-5" />
+                      Draft Information
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {/* Draft Status */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-3">
+                        <h4 className="font-semibold text-lg">Draft Status</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">Status:</span>
+                            {(() => {
+                              switch (teamDraftData.draft.status) {
+                                case 'pre_draft':
+                                  return <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 text-xs font-medium rounded-full">Pre-Draft</span>;
+                                case 'in_progress':
+                                  return <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">In Progress</span>;
+                                case 'complete':
+                                  return <span className="px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full">Complete</span>;
+                                default:
+                                  return <span className="px-2 py-1 bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full">{teamDraftData.draft.status}</span>;
+                              }
+                            })()}
                           </div>
-                        </div>
-                        
-                        <div className="space-y-3">
-                          <h4 className="font-semibold text-lg">Team Picks</h4>
-                          <div className="space-y-2">
-                            {owned.length > 0 && (
-                              <div>
-                                <h4 className="font-semibold mb-3 flex items-center gap-2">
-                                  <span className="text-green-600">✓</span>
-                                  Picks Owned
-                                </h4>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                                  {owned.map((pick: any, idx: number) => {
-                                    const isOriginal = pick.previousOwnerRosterId === pick.currentOwnerRosterId;
-                                    return (
-                                      <div key={idx} className="p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
-                                        <div className="font-semibold text-green-800 dark:text-green-200">
-                                          {`Round ${pick.round} • Pick ${pick.slot.toString().padStart(2, '0')}`}
-                                        </div>
-                                        <div className="text-sm text-green-600 dark:text-green-400">
-                                          {isOriginal ? (
-                                            <span>Original pick</span>
-                                          ) : (
-                                            <span>Acquired from {getTeamNameByRosterId(pick.previousOwnerRosterId)}</span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                            
-                            {sent.length > 0 && (
-                              <div className="mt-4">
-                                <h4 className="font-semibold mb-3 flex items-center gap-2">
-                                  <span className="text-red-600">✗</span>
-                                  Picks Traded Away
-                                </h4>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                                  {sent.map((pick: any, idx: number) => {
-                                    return (
-                                      <div key={idx} className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg">
-                                        <div className="font-semibold text-red-800 dark:text-red-200">
-                                          {`Round ${pick.round} • Pick ${pick.slot.toString().padStart(2, '0')}`}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
+                          <div className="text-sm text-muted-foreground">
+                            {teamDraftData.draft.type.charAt(0).toUpperCase() + teamDraftData.draft.type.slice(1)} • {teamDraftData.draft.settings.rounds} Rounds • {teamDraftData.draft.settings.teams} Teams
                           </div>
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                );
-              })()}
+                      
+                      <div className="space-y-3">
+                        <h4 className="font-semibold text-lg">Team Picks</h4>
+                        <div className="space-y-2">
+                          {(() => {
+                            // ---
+                            // Pre-draft pick attribution:
+                            // Do NOT use the picks array (actual player selections) for pre-draft pick display.
+                            // Only use slot_to_roster_id (from the draft object) and tradedPicks (from the traded picks endpoint).
+                            // If slot_to_roster_id is missing, build it from draft_order and userId-to-rosterId mapping.
+                            // ---
+                            const rounds = teamDraftData.draft.settings.rounds;
+                            const teams = teamDraftData.draft.settings.teams;
+                            let slotToRosterId: Record<string, number> = Object.create(null);
+                            if (teamDraftData.draft.slot_to_roster_id && typeof teamDraftData.draft.slot_to_roster_id === 'object') {
+                              slotToRosterId = teamDraftData.draft.slot_to_roster_id as Record<string, number>;
+                            }
+                            const draftOrder = teamDraftData.draft.draft_order || {};
+                            const tradedPicks = teamDraftData.tradedPicks || [];
+                            const ownedPicks = [];
+                            const tradedAwayPicks = [];
+
+                            // If slotToRosterId is empty, build it from draftOrder and league rosters
+                            if (Object.keys(slotToRosterId).length === 0 && Object.keys(draftOrder).length > 0 && rosters.length > 0) {
+                              // Build userId -> rosterId mapping
+                              const userIdToRosterId = {};
+                              rosters.forEach(roster => {
+                                userIdToRosterId[roster.ownerId] = roster.id;
+                              });
+                              // Build slot -> rosterId mapping
+                              slotToRosterId = {};
+                              Object.entries(draftOrder).forEach(([userId, slot]) => {
+                                const rosterId = userIdToRosterId[userId];
+                                if (rosterId !== undefined) {
+                                  slotToRosterId[String(slot)] = rosterId;
+                                }
+                              });
+                            }
+
+                            // Debug logging
+                            console.log('slotToRosterId', slotToRosterId);
+                            console.log('selectedTeam.id', selectedTeam.id, typeof selectedTeam.id);
+
+                            for (let round = 1; round <= rounds; round++) {
+                              for (let slot = 1; slot <= teams; slot++) {
+                                // Always use String(slot) for lookup, since slot_to_roster_id keys are strings
+                                const originalOwner: number | undefined = slotToRosterId[String(slot)];
+                                console.log(`Round ${round} Slot ${slot}: originalOwner=`, originalOwner, typeof originalOwner);
+                                if (!originalOwner) continue; // skip if mapping is missing
+                                // Find a trade for this pick (if any)
+                                const trade = tradedPicks.find(
+                                  (t: any) => t.round === round && t.roster_id === originalOwner
+                                );
+                                const finalOwner = trade ? trade.owner_id : originalOwner;
+
+                                if (finalOwner === selectedTeam.id) {
+                                  if (!trade && originalOwner === selectedTeam.id) {
+                                    ownedPicks.push(`Round ${round} • Pick ${slot.toString().padStart(2, '0')} (Original)`);
+                                  } else if (trade && originalOwner !== selectedTeam.id) {
+                                    const fromTeam = getTeamNameByRosterId(trade.previous_owner_id);
+                                    ownedPicks.push(`Round ${round} • Pick ${slot.toString().padStart(2, '0')} (from ${fromTeam})`);
+                                  } else if (trade && originalOwner === selectedTeam.id) {
+                                    ownedPicks.push(`Round ${round} • Pick ${slot.toString().padStart(2, '0')} (Original, reacquired)`);
+                                  } else {
+                                    ownedPicks.push(`Round ${round} • Pick ${slot.toString().padStart(2, '0')}`);
+                                  }
+                                } else if (originalOwner === selectedTeam.id && finalOwner !== selectedTeam.id) {
+                                  const toTeam = getTeamNameByRosterId(finalOwner);
+                                  tradedAwayPicks.push(`Round ${round} • Pick ${slot.toString().padStart(2, '0')} (to ${toTeam})`);
+                                }
+                              }
+                            }
+
+                            return (
+                              <div className="space-y-4">
+                                {ownedPicks.length > 0 && (
+                                  <div>
+                                    <h4 className="font-semibold mb-2 text-green-600">Picks Owned ({ownedPicks.length})</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                      {ownedPicks.map((pick, idx) => (
+                                        <div key={idx} className="p-2 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded text-sm">
+                                          {pick}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {tradedAwayPicks.length > 0 && (
+                                  <div>
+                                    <h4 className="font-semibold mb-2 text-red-600">Picks Traded Away ({tradedAwayPicks.length})</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                      {tradedAwayPicks.map((pick, idx) => (
+                                        <div key={idx} className="p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-sm">
+                                          {pick}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {ownedPicks.length === 0 && tradedAwayPicks.length === 0 && (
+                                  <div className="text-sm text-muted-foreground">
+                                    No draft picks found for this team.
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Transactions Section */}
+              {teamTransactions.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <RefreshCw className="h-5 w-5" />
+                      Recent Transactions
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {teamTransactions.map((transaction: any, index: number) => (
+                        <div key={index} className="p-4 border rounded-lg bg-muted/50">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-semibold">
+                              {transaction.type === 'trade' ? 'Trade' : 
+                               transaction.type === 'free_agent' ? 'Free Agent' :
+                               transaction.type === 'waiver' ? 'Waiver' :
+                               transaction.type}
+                            </span>
+                            <span className="text-sm text-muted-foreground">
+                              {new Date(transaction.created).toLocaleDateString()}
+                            </span>
+                          </div>
+                          
+                          {transaction.type === 'trade' && (
+                            <div className="text-sm space-y-2">
+                              <div className="font-medium">Trade Details:</div>
+                              <div className="pl-4 space-y-1">
+                                {transaction.adds && Object.keys(transaction.adds).length > 0 && (
+                                  <div>
+                                    <span className="font-medium text-green-600">Received:</span>
+                                    <div className="pl-2">
+                                      {Object.entries(transaction.adds).map(([playerId, rosterId]: [string, any]) => (
+                                        <div key={playerId} className="text-xs">
+                                          {players[playerId]?.name || `Player ${playerId}`} (Roster {rosterId})
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {transaction.drops && Object.keys(transaction.drops).length > 0 && (
+                                  <div>
+                                    <span className="font-medium text-red-600">Traded Away:</span>
+                                    <div className="pl-2">
+                                      {Object.entries(transaction.drops).map(([playerId, rosterId]: [string, any]) => (
+                                        <div key={playerId} className="text-xs">
+                                          {players[playerId]?.name || `Player ${playerId}`} (Roster {rosterId})
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {transaction.type === 'free_agent' && (
+                            <div className="text-sm">
+                              {transaction.adds && Object.keys(transaction.adds).length > 0 && (
+                                <div className="text-green-600">
+                                  Added: {Object.keys(transaction.adds).map(playerId => 
+                                    players[playerId]?.name || `Player ${playerId}`
+                                  ).join(', ')}
+                                </div>
+                              )}
+                              {transaction.drops && Object.keys(transaction.drops).length > 0 && (
+                                <div className="text-red-600">
+                                  Dropped: {Object.keys(transaction.drops).map(playerId => 
+                                    players[playerId]?.name || `Player ${playerId}`
+                                  ).join(', ')}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </DialogContent>
         </Dialog>

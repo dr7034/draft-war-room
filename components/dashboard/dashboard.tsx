@@ -18,6 +18,21 @@ import * as NFLIcons from 'react-nfl-logos';
 import { Zap, LayoutDashboard, ClipboardList, Users, BarChart2, User, ListChecks } from 'lucide-react';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '@/components/ui/dialog';
+import { ScrollArea } from "@/components/ui/scroll-area";
+import PlayerCard from '@/components/players/player-card';
+import DraftPickList from '@/components/draft/draft-pick-list';
+import DraftInsights from '@/components/draft/draft-insights';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Brain, RefreshCw, Search, X, ArrowLeftRight } from 'lucide-react';
+import RecommendationPanel from '@/components/ai/recommendation-panel';
+import { Label } from '@/components/ui/label';
+import { useToast } from "@/hooks/use-toast";
+import { sleeperAPI } from '@/lib/sleeper-api';
+import { Player } from '@/types/player';
+import { League } from '@/types/league';
+import { generateDraftStrategy } from '@/lib/analysis-utils';
+import { PickAttributionService } from '@/lib/pick-attribution-service';
 
 // Helper: get team logo URL (use static or fallback)
 const getTeamLogo = (team: string) => {
@@ -371,6 +386,7 @@ const DraftBoard: React.FC = () => {
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [draftOrder, setDraftOrder] = useState<string[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
+  const [tradedPicks, setTradedPicks] = useState<any[]>([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -406,6 +422,13 @@ const DraftBoard: React.FC = () => {
         if (!picksRes.ok) throw new Error('Failed to fetch picks');
         const picksData = await picksRes.json();
         if (isMounted) setPicks(picksData);
+
+        // Fetch traded picks
+        const tradedPicksRes = await fetch(`https://api.sleeper.app/v1/draft/${drafts[0].draft_id}/traded_picks`);
+        if (tradedPicksRes.ok) {
+          const tradedPicksData = await tradedPicksRes.json();
+          if (isMounted) setTradedPicks(tradedPicksData);
+        }
       } catch (err: any) {
         if (isMounted) setError(err.message || 'An error occurred');
       } finally {
@@ -417,10 +440,39 @@ const DraftBoard: React.FC = () => {
     return () => { isMounted = false; };
   }, [league?.id]); // Only depend on league.id
 
-  // Build draft board grid
+  // Get pick attribution using shared service
+  const getPickAttribution = () => {
+    if (!teams.length || !draftOrder.length || !league?.totalRounds || !league?.totalRosters) {
+      return { originalPicksBySlot: {}, finalPickOwners: {} };
+    }
+
+    // Convert draft order to the format expected by the service
+    const draftOrderMap: Record<string, any> = {};
+    draftOrder.forEach((userId, index) => {
+      draftOrderMap[userId] = index + 1;
+    });
+
+    return PickAttributionService.getPickOwnership(
+      teams,
+      draftOrderMap,
+      league.totalRounds,
+      league.totalRosters,
+      tradedPicks
+    );
+  };
+
+  // Get team name by roster ID
+  const getTeamNameByRosterId = (rosterId: number) => {
+    const team = teams.find(t => t.roster_id === rosterId);
+    return team?.display_name || team?.username || `Team ${rosterId}`;
+  };
+
+  // Build draft board grid with proper pick attribution
   let board: any[][] = [];
   let teamSlots: any[] = [];
   let rounds = 0;
+  let pickAttribution: { originalPicksBySlot: Record<string, number>, finalPickOwners: Record<string, number> } | null = null;
+
   if (picks.length > 0) {
     teamSlots = Array.from(new Set(picks.map(p => p.draft_slot))).sort((a, b) => a - b);
     rounds = Math.max(...picks.map(p => p.round));
@@ -432,6 +484,9 @@ const DraftBoard: React.FC = () => {
     teamSlots = draftOrder;
     rounds = league.totalRounds || 15;
     board = Array.from({ length: rounds }, () => Array(teamSlots.length).fill(null));
+    
+    // Calculate pick attribution for empty board
+    pickAttribution = getPickAttribution();
   }
 
   // Round navigation
@@ -497,6 +552,26 @@ const DraftBoard: React.FC = () => {
                       let logoEl = Icon ? <Icon size={24} /> : <img src="/assets/football.svg" alt="fallback" />;
                       
                       const isUserPick = pick && userTeam && pick.picked_by === userTeam.id;
+                      
+                      // Show pick attribution for empty slots
+                      let pickInfo = null;
+                      if (!pick && pickAttribution) {
+                        const pickKey = `${rIdx + 1}-${cIdx + 1}`;
+                        const originalOwner = pickAttribution.originalPicksBySlot[pickKey];
+                        const finalOwner = pickAttribution.finalPickOwners[pickKey];
+                        
+                        if (originalOwner !== undefined && finalOwner !== undefined) {
+                          const originalTeamName = getTeamNameByRosterId(originalOwner);
+                          const finalTeamName = getTeamNameByRosterId(finalOwner);
+                          
+                          pickInfo = {
+                            originalTeam: originalTeamName,
+                            finalTeam: finalTeamName,
+                            isTraded: originalOwner !== finalOwner
+                          };
+                        }
+                      }
+                      
                       return (
                         <td
                           key={cIdx}
@@ -515,6 +590,18 @@ const DraftBoard: React.FC = () => {
                                 Pick #{pick.pick_no} | Proj: {pick.metadata?.projected_points ?? 'N/A'} | ADP: {pick.metadata?.adp ?? 'N/A'}
                               </div>
                             </div>
+                          ) : pickInfo ? (
+                            <div className="flex flex-col gap-1">
+                              <div className="text-xs text-muted-foreground">
+                                {pickInfo.isTraded ? (
+                                  <span className="text-orange-600">
+                                    {pickInfo.finalTeam} (from {pickInfo.originalTeam})
+                                  </span>
+                                ) : (
+                                  <span>{pickInfo.finalTeam}</span>
+                                )}
+                              </div>
+                            </div>
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
@@ -530,6 +617,359 @@ const DraftBoard: React.FC = () => {
         {!loading && !error && board.length === 0 && (
           <div className="text-muted-foreground py-4">Your league draft has not started yet.</div>
         )}
+      </CardContent>
+    </Card>
+  );
+};
+
+// Transactions Component
+const Transactions: React.FC = () => {
+  const { league } = useDraftContext();
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [draftData, setDraftData] = useState<any>(null);
+  const [teams, setTeams] = useState<any[]>([]);
+  const [players, setPlayers] = useState<Record<string, any>>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchTransactions = async () => {
+      if (!league?.id) return;
+      
+      setLoading(true);
+      setError(null);
+      try {
+        // Fetch transactions
+        const transactionsData = await sleeperAPI.getLeagueTransactions(league.id, 1);
+        setTransactions(transactionsData);
+
+        // Fetch draft data for pick attribution
+        const drafts = await sleeperAPI.getLeagueDrafts(league.id);
+        if (drafts.length > 0) {
+          const draft = drafts[0];
+          const [picks, tradedPicks] = await Promise.all([
+            sleeperAPI.getDraftPicks(draft.draft_id),
+            sleeperAPI.getDraftTradedPicks(draft.draft_id)
+          ]);
+          setDraftData({ draft, picks, tradedPicks });
+        }
+
+        // Fetch teams for team names
+        const teamsData = await sleeperAPI.getLeagueUsers(league.id);
+        setTeams(teamsData);
+
+        // Fetch all players for name resolution
+        const playersRes = await fetch('https://api.sleeper.app/v1/players/nfl');
+        if (playersRes.ok) {
+          const playersData = await playersRes.json();
+          setPlayers(playersData);
+        }
+      } catch (err: any) {
+        setError(err.message || 'Failed to fetch transactions');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTransactions();
+  }, [league?.id]);
+
+  // Build pick attribution mappings
+  const buildPickMappings = () => {
+    if (!teams.length || !draftData?.draft?.draft_order) return {};
+
+    // Build userIdToRosterId from teams
+    const userIdToRosterId: Record<string, number> = {};
+    teams.forEach(team => {
+      if (team.user_id && team.roster_id !== undefined) {
+        userIdToRosterId[team.user_id] = team.roster_id;
+      }
+    });
+
+    // Build slotToUserId from draft order
+    const slotToUserId: Record<number, string> = {};
+    Object.entries(draftData.draft.draft_order).forEach(([userId, slot]) => {
+      slotToUserId[parseInt(slot as string)] = userId;
+    });
+
+    // Build slotToRosterId using slotToUserId and userIdToRosterId
+    const slotToRosterId: Record<number, number> = {};
+    Object.entries(slotToUserId).forEach(([slot, userId]) => {
+      const rosterId = userIdToRosterId[userId];
+      if (rosterId !== undefined) {
+        slotToRosterId[parseInt(slot)] = rosterId;
+      }
+    });
+
+    return { userIdToRosterId, slotToUserId, slotToRosterId };
+  };
+
+  // Calculate original picks attribution
+  const calculateOriginalPicks = () => {
+    const mappings = buildPickMappings();
+    const originalPicksBySlot: Record<string, number> = {};
+    
+    if (!league?.totalRounds || !league?.totalRosters || !mappings.slotToRosterId) return originalPicksBySlot;
+
+    for (let round = 1; round <= league.totalRounds; round++) {
+      for (let pick = 1; pick <= league.totalRosters; pick++) {
+        const slot = pick;
+        const rosterId = mappings.slotToRosterId[slot];
+        if (rosterId !== undefined) {
+          const pickKey = `${round}-${pick}`;
+          originalPicksBySlot[pickKey] = rosterId;
+        }
+      }
+    }
+
+    return originalPicksBySlot;
+  };
+
+  // Apply trades to determine final ownership
+  const calculateFinalPickOwners = () => {
+    const originalPicksBySlot = calculateOriginalPicks();
+    const finalPickOwners = { ...originalPicksBySlot };
+
+    // Apply all trades in order
+    draftData?.tradedPicks?.forEach((trade: any) => {
+      const pickKey = `${trade.round}-${trade.pick}`;
+      if (trade.new_owner_roster_id !== undefined) {
+        finalPickOwners[pickKey] = trade.new_owner_roster_id;
+      }
+    });
+
+    return { originalPicksBySlot, finalPickOwners };
+  };
+
+  // Get team name by roster ID
+  const getTeamNameByRosterId = (rosterId: number) => {
+    const team = teams.find(t => t.roster_id === rosterId);
+    return team?.display_name || team?.username || `Team ${rosterId}`;
+  };
+
+  // Get player name by player ID
+  const getPlayerName = (playerId: string) => {
+    const player = players[playerId];
+    return player?.full_name || player?.name || `Player ${playerId}`;
+  };
+
+  // Format transaction for display
+  const formatTransaction = (transaction: any) => {
+    const { originalPicksBySlot, finalPickOwners } = calculateFinalPickOwners();
+    
+    if (transaction.type === 'trade') {
+      const adds = transaction.adds || {};
+      const drops = transaction.drops || {};
+      const draftPicks = transaction.draft_picks || [];
+      
+      const involvedTeams = new Set([
+        ...Object.keys(adds),
+        ...Object.keys(drops),
+        ...draftPicks.map((pick: any) => pick.owner_id)
+      ]);
+
+      return {
+        type: 'trade',
+        teams: Array.from(involvedTeams).map(rosterId => ({
+          id: rosterId,
+          name: getTeamNameByRosterId(parseInt(rosterId))
+        })),
+        players: {
+          adds: Object.entries(adds).map(([rosterId, playerId]) => ({
+            rosterId: parseInt(rosterId),
+            teamName: getTeamNameByRosterId(parseInt(rosterId)),
+            playerId,
+            playerName: getPlayerName(playerId as string)
+          })),
+          drops: Object.entries(drops).map(([rosterId, playerId]) => ({
+            rosterId: parseInt(rosterId),
+            teamName: getTeamNameByRosterId(parseInt(rosterId)),
+            playerId,
+            playerName: getPlayerName(playerId as string)
+          }))
+        },
+        picks: draftPicks.map((pick: any) => {
+          const pickKey = `${pick.round}-${pick.pick || pick.roster_id}`;
+          const originalOwner = originalPicksBySlot[pickKey];
+          const finalOwner = finalPickOwners[pickKey];
+          
+          // Get the full trade chain for this pick
+          const { chain } = PickAttributionService.getPickTradeChain(
+            pick.round,
+            pick.pick || pick.roster_id,
+            draftData?.tradedPicks || [],
+            originalOwner
+          );
+          
+          return {
+            round: pick.round,
+            pick: pick.pick || pick.roster_id,
+            fromTeam: originalOwner ? getTeamNameByRosterId(originalOwner) : 'Unknown',
+            toTeam: pick.owner_id ? getTeamNameByRosterId(pick.owner_id) : 'Unknown',
+            isTraded: originalOwner !== pick.owner_id,
+            tradeChain: chain
+          };
+        }),
+        timestamp: transaction.created
+      };
+    }
+
+    return {
+      type: transaction.type,
+      description: `Transaction type: ${transaction.type}`,
+      timestamp: transaction.created
+    };
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Transactions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex justify-center items-center h-32">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Transactions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-red-500">{error}</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ArrowLeftRight className="h-5 w-5" />
+          League Transactions
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ScrollArea className="h-[600px]">
+          <div className="space-y-4">
+            {transactions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No transactions found.
+              </div>
+            ) : (
+              transactions.map((transaction, index) => {
+                const formatted = formatTransaction(transaction);
+                
+                return (
+                  <Card key={index} className="border-l-4 border-blue-500">
+                    <CardContent className="pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="capitalize">
+                            {formatted.type}
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(formatted.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+
+                                             {formatted.type === 'trade' && (
+                         <div className="space-y-3">
+                           {/* Teams involved */}
+                           <div>
+                             <h4 className="font-semibold text-sm mb-2">Teams Involved:</h4>
+                             <div className="flex flex-wrap gap-2">
+                               {formatted.teams?.map((team: any) => (
+                                 <Badge key={team.id} variant="secondary">
+                                   {team.name}
+                                 </Badge>
+                               )) || []}
+                             </div>
+                           </div>
+
+                           {/* Players traded */}
+                           {((formatted.players?.adds?.length || 0) > 0 || (formatted.players?.drops?.length || 0) > 0) && (
+                             <div>
+                               <h4 className="font-semibold text-sm mb-2">Players:</h4>
+                               <div className="space-y-2">
+                                 {formatted.players?.adds?.map((add: any, idx: number) => (
+                                   <div key={idx} className="flex items-center gap-2 text-sm">
+                                     <span className="text-green-600">+</span>
+                                     <span className="font-medium">{add.teamName}</span>
+                                     <span>receives {add.playerName}</span>
+                                   </div>
+                                 )) || []}
+                                 {formatted.players?.drops?.map((drop: any, idx: number) => (
+                                   <div key={idx} className="flex items-center gap-2 text-sm">
+                                     <span className="text-red-600">-</span>
+                                     <span className="font-medium">{drop.teamName}</span>
+                                     <span>sends {drop.playerName}</span>
+                                   </div>
+                                 )) || []}
+                               </div>
+                             </div>
+                           )}
+
+                           {/* Draft picks traded */}
+                           {formatted.picks?.length > 0 && (
+                             <div>
+                               <h4 className="font-semibold text-sm mb-2">Draft Picks:</h4>
+                               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                 {formatted.picks?.map((pick: any, idx: number) => (
+                                   <div key={idx} className="p-2 bg-muted rounded text-sm">
+                                     <div className="font-medium">
+                                       Round {pick.round} • Pick {(pick.pick || 0).toString().padStart(2, '0')}
+                                     </div>
+                                     <div className="text-xs text-muted-foreground">
+                                       {pick.isTraded ? (
+                                         <div>
+                                           <span className="text-orange-600">
+                                             {pick.toTeam} (from {pick.fromTeam})
+                                           </span>
+                                           {pick.tradeChain && pick.tradeChain.length > 1 && (
+                                             <div className="mt-1 text-xs">
+                                               <span className="text-muted-foreground">Chain: </span>
+                                               {pick.tradeChain.map((trade: any, chainIdx: number) => (
+                                                 <span key={chainIdx} className="text-muted-foreground">
+                                                   {chainIdx > 0 ? ' → ' : ''}{getTeamNameByRosterId(trade.to)}
+                                                 </span>
+                                               ))}
+                                             </div>
+                                           )}
+                                         </div>
+                                       ) : (
+                                         <span>{pick.toTeam}</span>
+                                       )}
+                                     </div>
+                                   </div>
+                                 )) || []}
+                               </div>
+                             </div>
+                           )}
+                         </div>
+                       )}
+
+                      {formatted.type !== 'trade' && (
+                        <div className="text-sm text-muted-foreground">
+                          {formatted.description}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        </ScrollArea>
       </CardContent>
     </Card>
   );
@@ -592,6 +1032,13 @@ export default function Dashboard() {
               <BarChart2 className="w-5 h-5 group-data-[state=active]:text-white text-blue-700 dark:text-blue-300 transition-colors" />
               Analytics
             </TabsTrigger>
+            <TabsTrigger value="transactions" className="group flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-base transition-all
+              data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-purple-500
+              data-[state=active]:text-white data-[state=active]:shadow-2xl data-[state=active]:scale-110
+              hover:scale-105 hover:shadow-lg">
+              <ListChecks className="w-5 h-5 group-data-[state=active]:text-white text-blue-700 dark:text-blue-300 transition-colors" />
+              Transactions
+            </TabsTrigger>
           </TabsList>
           
           <TabsContent value="cheatsheet" className="space-y-4">
@@ -616,6 +1063,10 @@ export default function Dashboard() {
           
           <TabsContent value="analytics" className="space-y-4">
             <AnalyticsPanel />
+          </TabsContent>
+          
+          <TabsContent value="transactions" className="space-y-4">
+            <Transactions />
           </TabsContent>
         </Tabs>
       </main>
